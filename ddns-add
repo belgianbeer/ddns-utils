@@ -1,0 +1,280 @@
+#!/bin/sh
+#
+#  ddns-utils - Dynamic DNS utilities
+#
+#  Copyright (c) 2016-2025 Masato Minda
+#
+#  Redistribution and use in source and binary forms, with or without
+#  modification, are permitted provided that the following conditions
+#  are met:
+#  1. Redistributions of source code must retain the above copyright
+#     notice, this list of conditions and the following disclaimer.
+#  2. Redistributions in binary form must reproduce the above copyright
+#     notice, this list of conditions and the following disclaimer in the
+#     documentation and/or other materials provided with the distribution.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+#  ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+#  IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+#  ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+#  FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+#  DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+#  OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+#  HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+#  LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+#  OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+#  SUCH DAMAGE.
+#
+#  $Id: ddns-add,v 1.26 2025/06/26 00:18:18 minmin Exp $
+#
+__initialize () {
+	local _ddnsdb0=${0%/*}/ddns.conf
+	local _ddnsdb1=${0%/*}/ddns-$(uname -n | sed -e 's/\..*//').conf
+
+	[ -f "${_ddnsdb0}" ] && . "${_ddnsdb0}"	# read database file
+	[ -f "${_ddnsdb1}" ] && . "${_ddnsdb1}"	# read database file in local
+
+	if [ -z "${db_zone_list}" ]; then
+		echo "${prog}: No ddns.conf or coniguration missing!" >&2
+		exit 2
+	fi
+
+	temp1=$(mktemp /tmp/ddnstemp1-XXXXXXXX)
+	temp2=$(mktemp /tmp/ddnstemp2-XXXXXXXX)
+	trap "rm -f ${temp1} ${temp2}; exit" 0 1 2 3 5 15
+}
+
+__tr () {
+	set -- "$1$2" "$2" "$3" ""
+	while [ "$1" ]; do
+		set -- "${1#*"$2"}" "$2" "$3" "$4${1%%"$2"*}$3"
+	done
+	eval "echo \${4%\"\$3\"}"
+}
+
+__search_db_dom () {
+	local _dh _dt _db _dcmp
+
+	_dt=$(__tr ${1} - _)
+	while [ -n "$_dt" ]; do
+		_dcmp=$(__tr ${_dt} . _)
+		if [ $_dcmp = $_dt ]; then
+			return
+		fi
+		for _db in ${db_zone_list} ; do
+			if [ "$_dcmp" = "$_db" ]; then
+				echo $_dcmp
+				return
+			fi
+		done
+		_dh=${_dh}.${_dt%%.*} _dt=${_dt#*.}
+	done
+}
+
+__search_db_ip () {
+	local _ip="ipv4_${1}" _iph _ipt _ib _icmp
+
+	_iph=${_ip%.*} _ipt=${_ip##*.}
+	while [ -n "$_iph" ]; do
+		_icmp=$(__tr ${_iph} . _)
+		if [ ${_icmp} = ${_iph} ]; then
+			return
+		fi
+		for _ib in ${db_ipv4_list} ; do
+			if [ ${_icmp} = ${_ib} ]; then
+				echo $_icmp
+				return
+			fi
+		done
+		_iph=${_iph%.*} _ipt=${_iph##*.}.${_ipt}
+	done
+}
+
+__arpaname () {
+	local _t
+	_t=$(arpaname ${1} | tr '[:upper:]' '[:lower:]') || return
+	echo "${_t}"
+}
+
+__get_exist_rr () {
+	dig @"${1}" "${2}" "${3}" +noall +answer
+}
+
+__do_update () {
+	local _key
+
+	[ -n "${2}" ] && _key="-k ${2}"
+	if [ -n "${n_flag}" ]; then
+		echo '===' nsupdate ${_key} ${1}
+		cat ${1}
+	else
+		[ -z "${q_flag}" ] && cat ${1}
+		nsupdate ${_key} ${1}
+	fi
+}
+
+__delete_ptr_rr () {
+	local _db _nsvr _zone _key _keyu _keyt
+
+	for _db in $db_ipv4_list ; do
+		eval _nsvr=\$${_db}_nsvr _zone=\$${_db}_zone _keyt=\$${_db}_keyt _keyu=\$${_db}_keyu
+		_key=''
+		[ -n "${_keyt}" ] && _key="-k ${_keyt}"
+		local _rr="$(dig ${_key} @${_nsvr} ${_zone} axfr +noall +answer | grep -i '[ 	]PTR[ 	]*'${1}'.$')"
+		if [ -n "${_rr}" ]; then
+			echo "server ${_nsvr}" > ${temp2}
+			echo "zone ${_zone}" >> ${temp2}
+			echo "${_rr}" | sed -e 's/^/update delete	/' >> ${temp2}
+			echo "send" >> ${temp2}
+			__do_update ${temp2} ${_keyu}
+		fi
+	done
+}
+
+__check_support () {
+	if [ -z "${2}" ]; then
+		echo "${1}: unsupported domain" >&2
+		exit 2
+	fi
+}
+
+__ddns_add () {
+	local _rfqdn _del_rr _db _nsvr _zone _ttl _keyu
+
+	if [ $# -lt 2 ]; then
+		echo "Usage: ${prog} [-nqa] name ipaddr" >&2
+		exit 1
+	fi
+
+	_db=$(__search_db_dom ${1})
+	__check_support "${1}" "${_db}"
+	_rfqdn=$(__arpaname "${2}")
+	if [ -z "${_rfqdn}" ]; then
+		echo "${2}: bad ip address." >&2
+		exit 2
+	fi
+
+	eval _nsvr=\$${_db}_nsvr _zone=\$${_db}_zone _ttl=\$${_db}_dttl _keyu=\$${_db}_keyu
+	echo "server ${_nsvr}" >> "${temp1}"
+	echo "zone ${_zone}" >> "${temp1}"
+	_del_rr="$(__get_exist_rr ${_nsvr} ${1} a)"
+	if [ -n "${_del_rr}" ] && [ -z "${a_flag}" ]; then
+		__delete_ptr_rr ${1}
+		echo "${_del_rr}" | sed -e 's/^/update delete	/' >> "${temp1}"
+	fi
+	echo "update add	${1}.	${_ttl}	IN	A	${2}" >> "${temp1}"
+	echo "send" >> "${temp1}"
+	__do_update ${temp1} ${_keyu}
+
+	# PTR RR
+	_db=$(__search_db_ip ${2})
+	if [ -z "${_db}" ]; then
+		return
+	fi
+
+	eval _nsvr=\$${_db}_nsvr _zone=\$${_db}_zone _ttl=\$${_db}_dttl _keyu=\$${_db}_keyu
+	echo "server ${_nsvr}" > ${temp1}
+	echo "zone ${_zone}" >> ${temp1}
+	echo "update add	${_rfqdn}.	${_ttl}	IN	PTR	${1} " >> ${temp1}
+	echo "send" >> ${temp1}
+	__do_update ${temp1} ${_keyu}
+}
+
+__ddns_delete () {
+	local _rfqdn _del_rr _db _nsvr _zone _ttl _keyu
+
+	if [ $# -lt 1 ]; then
+		echo "Usage: ${prog} [-nq] name" >&2
+		exit 1
+	fi
+	_db=$(__search_db_dom ${1})
+	__check_support "${1}" "${_db}"
+
+	eval _nsvr=\$${_db}_nsvr _zone=\$${_db}_zone _ttl=\$${_db}_dttl _keyu=\$${_db}_keyu
+	_del_rr=$(__get_exist_rr "${_nsvr}" "${1}" a)
+	if [ -z "${_del_rr}" ]; then
+		echo "${1}: no such domain" >&2
+		exit 2
+	fi
+	echo "server $_nsvr" >> "${temp1}"
+	echo "zone $_zone" >> "${temp1}"
+	echo "${_del_rr}" | sed -e 's/^/update delete	/' >> "${temp1}"
+	echo "send" >> "${temp1}"
+	__do_update ${temp1} ${_keyu}
+	__delete_ptr_rr ${1}
+}
+
+__ddns_zone () {
+	local _db _nsvr _zone _ttl _keyt
+
+	if [ $# -lt 1 ]; then
+		echo "Usage: ${prog} [-nq] name" >&2
+		exit 1
+	fi
+
+	_db=$(__search_db_dom ${1})
+	if [ -z "${_db}" ]; then
+		_db=$(__search_db_ip ${1})
+		__check_support "${1}" "${_db}"
+	fi
+
+	eval _nsvr=\$${_db}_nsvr _zone=\$${_db}_zone _ttl=\$${_db}_dttl _keyt=\$${_db}_keyt
+	[ -n "${_keyt}" ] && _key="-k ${_keyt}"
+	dig ${_key} @"${_nsvr}" "${_zone}" axfr +noall +answer
+}
+
+__ddns_hosts () {
+	local _db _nsvr _zone _ttl _keyt _d
+
+	if [ $# -lt 1 ]; then
+		echo "Usage: ${prog} zone [zone ...]" >&2
+		exit 1
+	fi
+
+	for _d in "$@"; do
+		_db=$(__search_db_dom ${_d})
+		__check_support "${_d}" "${_db}"
+
+		eval _nsvr=\$${_db}_nsvr _zone=\$${_db}_zone _ttl=\$${_db}_dttl _keyt=\$${_db}_keyt
+		_key=''
+		[ -n "${_keyt}" ] && _key="-k ${_keyt}"
+		dig ${_key} @"${_nsvr}" "${_zone}" axfr +noall +answer
+	done |
+	sed -ne '/IN[	 ]A[	 ]/s/^\([^[:blank:]]*\)\.[[:blank:]].*[[:blank:]]\([.[:digit:]][.[:digit:]]*\)$/\2	\1/p' | sort --version-sort
+}
+
+__ddns_backup () {
+	local _db _nsvr _zone _keyt _key
+
+	for _db in $db_zone_list $db_ipv4_list ; do
+		eval _nsvr=\$${_db}_nsvr _zone=\$${_db}_zone _keyt=\$${_db}_keyt
+		_key=''
+		[ -n "${_keyt}" ] && _key="-k ${_keyt}"
+		dig ${_key} @${_nsvr} ${_zone} axfr +noall +answer | sort -u --version-sort > ${_zone}
+	done
+}
+
+# --------------------------------------------------
+#  main
+#
+prog="${0##*/}"
+
+__initialize
+
+while getopts 'anq' cmd_arg ; do
+	case "${cmd_arg}" in
+	a)	a_flag=YES ;;	# add record (no remove previous)
+	n)	n_flag=YES ;;	# no exec (test mode)
+	q)	q_flag=YES ;;	# quiet mode
+	*)	echo "${cmd_arg}: bad option" >&2 ; exit 1;;
+	esac
+done
+shift $((OPTIND - 1))
+
+case "${prog}" in
+*-add)		__ddns_add "$@" ;;
+*-del)		__ddns_delete "$@" ;;
+*-zone)		__ddns_zone "$@" ;;
+*-hosts)	__ddns_hosts "$@" ;;
+*-backup)	__ddns_backup ;;
+esac

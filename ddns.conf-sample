@@ -1,0 +1,35 @@
+# $Id: ddns.conf-sample,v 1.1 2025/06/23 03:36:51 minmin Exp $
+
+db_zone_list="
+	example_jp
+	example_org
+"
+
+db_ipv4_list="
+	ipv4_192_168_10
+	ipv4_172_19
+"
+
+example_jp_zone=example.jp
+example_jp_nsvr=ns0.example.jp
+example_jp_dttl=86400
+example_jp_keyu=~/.tsig/example.jp-update.key
+example_jp_keyt=~/.tsig/example-transfer.key
+
+example_org_zone=example.org
+example_org_nsvr=ns0.example.jp
+example_org_dttl=86400
+example_org_keyu=~/.tsig/example.org-update.key
+example_org_keyt=~/.tsig/example-transfer.key
+
+ipv4_192_168_10_zone=10.168.192.in-addr.arpa
+ipv4_192_168_10_nsvr=ns0.example.jp
+ipv4_192_168_10_dttl=86400
+ipv4_192_168_10_keyu=~/.tsig/ipaddress-update.key
+ipv4_192_168_10_keyt=~/.tsig/example-transfer.key
+
+ipv4_172_19_zone=19.172.in-addr.arpa
+ipv4_172_19_nsvr=ns0.example.jp
+ipv4_172_19_dttl=86400
+ipv4_172_19_keyu=~/.tsig/ipaddress-update.key
+ipv4_172_16_keyt=~/.tsig/example-transfer.key
