@@ -25,7 +25,7 @@
 #  OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 #  SUCH DAMAGE.
 #
-#  $Id: ddns-add,v 1.26 2025/06/26 00:18:18 minmin Exp $
+#  $Id: ddns-add,v 1.27 2025/07/01 03:13:54 minmin Exp $
 #
 __initialize () {
 	local _ddnsdb0=${0%/*}/ddns.conf
@@ -224,23 +224,30 @@ __ddns_zone () {
 }
 
 __ddns_hosts () {
-	local _db _nsvr _zone _ttl _keyt _d
+	local _db _nsvr _zone _ttl _keyt _key _d=$1
 
 	if [ $# -lt 1 ]; then
 		echo "Usage: ${prog} zone [zone ...]" >&2
 		exit 1
 	fi
 
-	for _d in "$@"; do
-		_db=$(__search_db_dom ${_d})
+	_db=$(__search_db_dom ${_d})
+	if [ -n "${_db}" ]; then
+		eval _nsvr=\$${_db}_nsvr _zone=\$${_db}_zone _ttl=\$${_db}_dttl _keyt=\$${_db}_keyt
+		[ -n "${_keyt}" ] && _key="-k ${_keyt}"
+		dig ${_key} @"${_nsvr}" "${_zone}" axfr +noall +answer |
+			sed -ne 's/^\([^[:blank:]]*\)[[:blank:]]*[[:digit:]]*[[:blank:]]*IN[[:blank:]]*A[[:blank:]]*\([^[:blank:]]*\)$/\2	\1/p' |
+			sort --version-sort -u
+	else
+		_db=$(__search_db_ip ${_d})
 		__check_support "${_d}" "${_db}"
 
 		eval _nsvr=\$${_db}_nsvr _zone=\$${_db}_zone _ttl=\$${_db}_dttl _keyt=\$${_db}_keyt
-		_key=''
 		[ -n "${_keyt}" ] && _key="-k ${_keyt}"
-		dig ${_key} @"${_nsvr}" "${_zone}" axfr +noall +answer
-	done |
-	sed -ne '/IN[	 ]A[	 ]/s/^\([^[:blank:]]*\)\.[[:blank:]].*[[:blank:]]\([.[:digit:]][.[:digit:]]*\)$/\2	\1/p' | sort --version-sort
+		dig ${_key} @"${_nsvr}" "${_zone}" axfr +noall +answer |
+			sed -ne 's/^\([[:digit:]]*\)\.\([[:digit:]]*\)\.\([[:digit:]]*\)\.\([[:digit:]]*\)\..*IN[[:blank:]]*PTR[[:blank:]]*\([^[:blank:]]*\)$/\4.\3.\2.\1	\5/p' |
+			sort --version-sort -u
+	fi
 }
 
 __ddns_backup () {
