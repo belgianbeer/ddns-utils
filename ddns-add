@@ -25,7 +25,7 @@
 #  OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 #  SUCH DAMAGE.
 #
-#  $Id: ddns-add,v 1.27 2025/07/01 03:13:54 minmin Exp $
+#  $Id: ddns-add,v 1.28 2025/07/04 05:01:42 minmin Exp $
 #
 __initialize () {
 	local _ddnsdb0=${0%/*}/ddns.conf
@@ -253,7 +253,14 @@ __ddns_hosts () {
 __ddns_backup () {
 	local _db _nsvr _zone _keyt _key
 
-	for _db in $db_zone_list $db_ipv4_list ; do
+	for _db in $db_zone_list ; do
+		eval _nsvr=\$${_db}_nsvr _zone=\$${_db}_zone _keyt=\$${_db}_keyt
+		_key=''
+		[ -n "${_keyt}" ] && _key="-k ${_keyt}"
+		dig ${_key} @${_nsvr} ${_zone} axfr +noall +answer | sort -u > ${_zone}
+	done
+
+	for _db in $db_ipv4_list ; do
 		eval _nsvr=\$${_db}_nsvr _zone=\$${_db}_zone _keyt=\$${_db}_keyt
 		_key=''
 		[ -n "${_keyt}" ] && _key="-k ${_keyt}"
