@@ -25,7 +25,7 @@
 #  OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 #  SUCH DAMAGE.
 #
-#  $Id: ddns-add,v 1.28 2025/07/04 05:01:42 minmin Exp $
+#  $Id: ddns-add,v 1.30 2026/05/29 13:11:05 minmin Exp $
 #
 __initialize () {
 	local _ddnsdb0=${0%/*}/ddns.conf
@@ -56,6 +56,11 @@ __search_db_dom () {
 	local _dh _dt _db _dcmp
 
 	_dt=$(__tr ${1} - _)
+
+	case $_dt in
+	*.)	_dt=${_dt%.};;
+	esac
+
 	while [ -n "$_dt" ]; do
 		_dcmp=$(__tr ${_dt} . _)
 		if [ $_dcmp = $_dt ]; then
@@ -162,7 +167,7 @@ __ddns_add () {
 		__delete_ptr_rr ${1}
 		echo "${_del_rr}" | sed -e 's/^/update delete	/' >> "${temp1}"
 	fi
-	echo "update add	${1}.	${_ttl}	IN	A	${2}" >> "${temp1}"
+	echo "update add	${1}	${_ttl}	IN	A	${2}" >> "${temp1}"
 	echo "send" >> "${temp1}"
 	__do_update ${temp1} ${_keyu}
 
@@ -180,7 +185,7 @@ __ddns_add () {
 	__do_update ${temp1} ${_keyu}
 }
 
-__ddns_delete () {
+__ddns_del () {
 	local _rfqdn _del_rr _db _nsvr _zone _ttl _keyu
 
 	if [ $# -lt 1 ]; then
@@ -285,10 +290,4 @@ while getopts 'anq' cmd_arg ; do
 done
 shift $((OPTIND - 1))
 
-case "${prog}" in
-*-add)		__ddns_add "$@" ;;
-*-del)		__ddns_delete "$@" ;;
-*-zone)		__ddns_zone "$@" ;;
-*-hosts)	__ddns_hosts "$@" ;;
-*-backup)	__ddns_backup ;;
-esac
+__$(__tr $prog - _) "$@"
