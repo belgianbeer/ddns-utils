@@ -2,7 +2,7 @@
 #
 #  ddns-utils - Dynamic DNS utilities
 #
-#  Copyright (c) 2016-2025 Masato Minda
+#  Copyright (c) 2016-2026 Masato Minda
 #
 #  Redistribution and use in source and binary forms, with or without
 #  modification, are permitted provided that the following conditions
@@ -25,7 +25,7 @@
 #  OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 #  SUCH DAMAGE.
 #
-#  $Id: ddns-add,v 1.31 2026/06/05 04:35:35 minmin Exp $
+#  $Id: ddns-add,v 1.32 2026/10/29 02:39:28 minmin Exp $
 #
 __initialize () {
 	local _ddnsdb0=${0%/*}/ddns.conf
@@ -153,9 +153,14 @@ __ddns_add () {
 	local _rfqdn _del_rr _db _nsvr _zone _ttl _keyu
 
 	if [ $# -lt 2 ]; then
-		echo "Usage: ${prog} [-nqa] name ipaddr" >&2
+		echo "Usage: ${prog} [-nqa] [-t ttl] name ipaddr" >&2
 		exit 1
 	fi
+
+	case "${ttl_arg}" in
+	'' ) ;;
+	*[!0-9]* ) echo "${prog}: invalid TTL: ${ttl_arg}" >&2; exit 1 ;;
+	esac
 
 	_db=$(__search_db_dom ${1})
 	__check_support "${1}" "${_db}"
@@ -166,6 +171,7 @@ __ddns_add () {
 	fi
 
 	eval _nsvr=\$${_db}_nsvr _zone=\$${_db}_zone _ttl=\$${_db}_dttl _keyu=\$${_db}_keyu
+	[ -n "${ttl_arg}" ] && _ttl=${ttl_arg}
 	echo "server ${_nsvr}" >> "${temp1}"
 	echo "zone ${_zone}" >> "${temp1}"
 	_del_rr="$(__get_exist_rr ${_nsvr} ${1} a)"
@@ -184,6 +190,7 @@ __ddns_add () {
 	fi
 
 	eval _nsvr=\$${_db}_nsvr _zone=\$${_db}_zone _ttl=\$${_db}_dttl _keyu=\$${_db}_keyu
+	[ -n "${ttl_arg}" ] && _ttl=${ttl_arg}
 	echo "server ${_nsvr}" > ${temp1}
 	echo "zone ${_zone}" >> ${temp1}
 	echo "update add	${_rfqdn}.	${_ttl}	IN	PTR	${1} " >> ${temp1}
@@ -286,11 +293,12 @@ prog="${0##*/}"
 
 __initialize
 
-while getopts 'anq' cmd_arg ; do
+while getopts 'anqt:' cmd_arg ; do
 	case "${cmd_arg}" in
 	a)	a_flag=YES ;;	# add record (no remove previous)
 	n)	n_flag=YES ;;	# no exec (test mode)
 	q)	q_flag=YES ;;	# quiet mode
+	t)	ttl_arg="$OPTARG";; # TTL (ddns-add only)
 	*)	echo "${cmd_arg}: bad option" >&2 ; exit 1;;
 	esac
 done
